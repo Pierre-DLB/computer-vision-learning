@@ -85,6 +85,7 @@ class MSA(nn.Module):
     #         MSA = torch.cat(vectors, dim=1)
     #         return self.unification_matrix(MSA)
 
+
 class MLP(nn.Module):
     def __init__(self, embedding_dim, mlp_size, dropout=0.1):
         super().__init__()
@@ -125,18 +126,17 @@ class Encoder(nn.Module):
         mlp_x = self.MLP(self.norm(att_x)) + x 
         return mlp_x
 
+
 class PatchEmbedder(nn.Module):
 
-    def __init__(self, patch_size: int, embedding_dim:int = 768, patch_num=196, random=True):
+    def __init__(self, patch_size: int, image_size: int=224, embedding_dim:int = 768, random=True):
         super().__init__()
 
-        self.patch_size = patch_size
-        self.embedding_dim = embedding_dim
-        self.patch_num = patch_num
         self.conv = nn.Conv2d(in_channels=3, out_channels=embedding_dim, 
                               kernel_size=(patch_size, patch_size), stride=patch_size, padding=0)
-                            # donne en gros le meme resultat que couper en petits patches, flatten et passer dans une linear layer
+                            # same as cutting in smaller patches
         self.flat = nn.Flatten(start_dim=2, end_dim=3)
+        patch_num=(image_size//patch_size)**2
 
         # ADD [CLASS] TOKEN
         if random:
@@ -155,7 +155,10 @@ class PatchEmbedder(nn.Module):
         batch_size = x.shape[0]
         y = self.flat(self.conv(x))
         y = y.permute(0, 2, 1)
-        return torch.cat((self.class_embedding.expand(batch_size, -1, -1), y),dim=1) + self.pos_embedding
+        class_token = self.class_embedding.expand(batch_size, -1, -1)
+        class_pos_emb = torch.cat((class_token, y),dim=1) + self.pos_embedding
+
+        return class_pos_emb
 
 
 class ViT(nn.Module):
@@ -174,42 +177,30 @@ class ViT(nn.Module):
         super().__init__() # don't forget the super().__init__()!
         assert img_size % patch_size == 0, f"Image size must be divisible by patch size, image size: {img_size}, patch size: {patch_size}."
 
-        self.img_size = img_size
-        self.in_channels = in_channels
-        self.patch_size = patch_size
-        self.patch_num = (self.img_size//self.patch_size)**2
-        self.num_transformer_layers = num_transformer_layers
-        self.embedding_dim = embedding_dim
-        self.mlp_size = mlp_size
-        self.num_heads = num_heads
-        self.attn_dropout = attn_dropout
-        self.mlp_dropout = mlp_dropout
-        self.embedding_dropout = embedding_dropout
-        self.num_classes = num_classes
 
-        self.Embedding = PatchEmbedder(patch_size=self.patch_size,
-                                        embedding_dim=self.embedding_dim,
-                                        patch_num=self.patch_num, random=True)
+        self.Embedding = PatchEmbedder(patch_size=patch_size,
+                                       image_size=img_size,
+                                       embedding_dim=embedding_dim, random=True)
         
-        self.EmbeddingDropout = nn.Dropout(p=self.embedding_dropout)
+        self.EmbeddingDropout = nn.Dropout(p=embedding_dropout)
         
-        self.StackedEncoders = nn.Sequential(*[Encoder(embedding_dim=self.embedding_dim, 
-                                                num_heads=self.num_heads,
-                                                mlp_size=self.mlp_size,
-                                                mlp_dropout=self.mlp_dropout,
-                                                attn_dropout=self.attn_dropout)
-                                        for layer in range(self.num_transformer_layers)])
+        self.StackedEncoders = nn.Sequential(*[Encoder(embedding_dim=embedding_dim,
+                                                num_heads=num_heads,
+                                                mlp_size=mlp_size,
+                                                mlp_dropout=mlp_dropout,
+                                                attn_dropout=attn_dropout)
+                                        for layer in range(num_transformer_layers)])
         self.Classifier = nn.Sequential(
         nn.LayerNorm(normalized_shape=embedding_dim),
         nn.Linear(in_features=embedding_dim, out_features=num_classes)
         )
 
-        def forward(x):
-            embedded_x = self.Embedding(x)
-            embedded_x = self.EmbeddingDropout(embedded_x)
-            embedded_x = self.StackedEncoders(embedded_x)
-            class_x = self.Classifier(x)
-            return class_x[:,0]
+    def forward(self, x):
+        embedded_x = self.Embedding(x)
+        embedded_x = self.EmbeddingDropout(embedded_x)
+        embedded_x = self.StackedEncoders(embedded_x)
+        class_x = self.Classifier(embedded_x)
+        return class_x[:,0]
 
             
 

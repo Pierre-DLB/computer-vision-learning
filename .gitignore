@@ -6,6 +6,7 @@ __pycache__/
 # C extensions
 *.so
 caltech101/
+.trunk/
 
 # Distribution / packaging
 .Python
