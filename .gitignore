@@ -7,6 +7,9 @@ __pycache__/
 *.so
 caltech101/
 .trunk/
+dino-main/
+data/
+.DS_Store
 
 # Distribution / packaging
 .Python
